@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Excel with Aashfaque — CSSE 11+ Platform v2.1</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script></script>
 <style>
 :root{
   --ink:#0e1a2b;--ink2:#2c3e55;--ink3:#5a6a7e;
@@ -655,48 +655,60 @@ async function studentLogin() {
   const errEl = document.getElementById('s-err');
   const btn   = document.querySelector('#login-screen .btn-green');
 
+  function resetBtn() {
+    if (btn) { btn.textContent = 'Login & Start Exam'; btn.disabled = false; }
+  }
+
   if (!id || !pass) {
-    errEl.textContent = 'Please enter both your Student ID and Password.';
+    errEl.textContent = 'Please enter your Student ID and Password.';
     errEl.style.display = 'block';
     return;
   }
 
-  if (btn) { btn.textContent = 'Signing in...'; btn.disabled = true; }
+  if (btn) { btn.textContent = 'Checking...'; btn.disabled = true; }
   errEl.style.display = 'none';
 
-  const cfg = getCloudConfig();
+  // Build combined student list: baked + local store + cloud
+  var allStudents = BAKED_STUDENTS.slice(); // always start with baked-in students
 
-  // Try fetching from JSONBin cloud
-  try {
-    if (btn) btn.textContent = 'Fetching student data...';
-    const resp = await fetch('https://api.jsonbin.io/v3/b/' + cfg.binId + '/latest', {
-      headers: { 'X-Master-Key': cfg.apiKey }
+  // Add any students from local storage
+  var local = loadStore();
+  if (local.students && local.students.length > 0) {
+    local.students.forEach(function(s) {
+      if (!allStudents.find(function(x){ return x.id === s.id; })) {
+        allStudents.push(s);
+      }
     });
-    if (resp.ok) {
-      const data = await resp.json();
-      const record = data.record || data;
-      if (record.students && record.students.length > 0) {
-        const local = loadStore();
-        local.students = record.students;
-        if (record.exams) local.exams = record.exams;
-        localStorage.setItem(STORE_KEY, JSON.stringify(local));
+  }
+
+  // Try cloud (non-blocking - if fails, we still have baked students)
+  try {
+    var cfg = getCloudConfig();
+    if (cfg.binId && cfg.apiKey) {
+      var resp = await fetch('https://api.jsonbin.io/v3/b/' + cfg.binId + '/latest', {
+        headers: { 'X-Master-Key': cfg.apiKey }
+      });
+      if (resp.ok) {
+        var data = await resp.json();
+        var record = data.record || data;
+        if (record.students && record.students.length > 0) {
+          record.students.forEach(function(s) {
+            if (!allStudents.find(function(x){ return x.id === s.id; })) {
+              allStudents.push(s);
+            }
+          });
+        }
       }
     }
   } catch(e) {
-    console.warn('Cloud fetch failed, using local/baked students:', e.message);
+    console.warn('Cloud unavailable, using baked students');
   }
 
-  // Always fall back to baked students if nothing in store
-  STORE = loadStore();
-  if (!STORE.students || STORE.students.length === 0) {
-    STORE.students = BAKED_STUDENTS;
-    localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
-  }
+  resetBtn();
 
-  if (btn) { btn.textContent = 'Login & Start Exam'; btn.disabled = false; }
-
-  const student = (STORE.students || []).find(function(s) {
-    return s.id && s.id.toUpperCase() === id && s.password === pass && s.active !== false;
+  // Find the student
+  var student = allStudents.find(function(s) {
+    return s.id && s.id.toUpperCase() === id && String(s.password) === String(pass) && s.active !== false;
   });
 
   if (student) {
@@ -706,8 +718,8 @@ async function studentLogin() {
     return;
   }
 
-  const allIds = (STORE.students || []).map(function(s) { return s.id; }).join(', ');
-  errEl.innerHTML = '<strong>Student ID or password not found.</strong><br>You typed: <strong>' + id + '</strong><br>Available IDs: <strong>' + (allIds || 'none') + '</strong><br>Password is case-sensitive.';
+  var ids = allStudents.map(function(s){ return s.id; }).join(', ');
+  errEl.innerHTML = '<strong>ID or password not found.</strong> You typed: <strong>' + id + '</strong> — Available: <strong>' + ids + '</strong>';
   errEl.style.display = 'block';
 }
 
